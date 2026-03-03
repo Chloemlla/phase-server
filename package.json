@@ -8,7 +8,6 @@
     "db:create": "wrangler d1 create phase-db",
     "db:migrate:local": "wrangler d1 migrations apply phase-db --local",
     "db:migrate:prod": "wrangler d1 migrations apply phase-db --remote",
-    "setup:secret": "node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\" | wrangler secret put JWT_SECRET",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

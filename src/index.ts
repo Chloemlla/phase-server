@@ -1,51 +1,39 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import type { AppEnv } from "./types";
-import { ErrorCode } from "./types";
 import { instanceTokenMiddleware } from "./middleware/instanceToken";
 import { rateLimitMiddleware } from "./middleware/rateLimit";
-import { ensureInitialized } from "./utils/init";
 import auth from "./routes/auth";
-import vault from "./routes/vault";
 import sessions from "./routes/sessions";
+import vault from "./routes/vault";
+import type { AppContext, AppEnv } from "./types";
+import { ErrorCode } from "./types";
+import { ensureInitialized } from "./utils/init";
 
 const app = new Hono<AppEnv>();
-
-// ─── 全局中间件 ───
 
 app.use("/*", async (c, next) => {
   const origin = c.env.CORS_ORIGIN ?? "*";
   const middleware = cors({
     origin: origin === "*" ? "*" : origin.split(","),
     allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowHeaders: ["Content-Type", "Authorization", "X-Phase-Instance-Token"],
+    allowHeaders: ["Content-Type", "Authorization", "X-Instance-Token"],
     maxAge: 86400,
   });
   return middleware(c, next);
 });
 
-// Instance Token 保护所有 /api/* 路由（包括 /health）
-app.use("/api/*", instanceTokenMiddleware);
-
-// 自动初始化：建表 + 注入 JWT Secret + instanceSalt
 app.use("/api/*", async (c, next) => {
-  const { jwtSecret, instanceSalt } = await ensureInitialized(c.env.DB, c.env.JWT_SECRET);
+  const { jwtSecret, instanceSalt, instanceToken } = await ensureInitialized(c.env.DB, c.env.JWT_SECRET);
   c.set("jwtSecret", jwtSecret);
   c.set("instanceSalt", instanceSalt);
+  c.set("instanceToken", instanceToken);
   await next();
 });
 
+app.use("/api/*", instanceTokenMiddleware);
 app.use("/api/*", rateLimitMiddleware);
 
-// ─── 路由挂载 ───
-
-app.route("/api/v1/auth", auth);
-app.route("/api/v1/vault", vault);
-app.route("/api/v1/sessions", sessions);
-
-// ─── Health check ───
-
-app.get("/api/v1/health", async (c) => {
+async function healthHandler(c: AppContext) {
   const row = await c.env.DB.prepare("SELECT id FROM vault WHERE id = 'default'").first();
   return c.json({
     status: "ok" as const,
@@ -53,9 +41,64 @@ app.get("/api/v1/health", async (c) => {
     version: "0.1.0",
     instanceSalt: c.get("instanceSalt"),
   });
+}
+
+app.get("/", async (c) => {
+  try {
+    const { instanceSalt } = await ensureInitialized(c.env.DB, c.env.JWT_SECRET);
+    const row = await c.env.DB.prepare("SELECT id FROM vault WHERE id = 'default'").first();
+
+    return c.json({
+      status: "ok" as const,
+      initialized: !!row,
+      apiBase: "/api/v1",
+      health: "/api/v1/health",
+      instanceSalt,
+    });
+  } catch (err) {
+    console.error("Root readiness check failed:", err);
+    return c.json(
+      {
+        status: "error",
+        message: "Phase server is not ready",
+        apiBase: "/api/v1",
+        health: "/api/v1/health",
+      },
+      503,
+    );
+  }
 });
 
-// ─── 错误处理 ───
+app.get("/api/v1/setup-token", async (c) => {
+  const revealed = await c.env.DB.prepare(
+    "SELECT value FROM config WHERE key = 'token_revealed'",
+  ).first<{ value: string }>();
+
+  if (revealed) {
+    return c.json(
+      {
+        error: {
+          code: ErrorCode.NOT_FOUND,
+          message: "Instance token has already been retrieved. This endpoint is permanently closed.",
+          status: 410,
+        },
+      },
+      410,
+    );
+  }
+
+  await c.env.DB.prepare(
+    "INSERT OR IGNORE INTO config (key, value) VALUES ('token_revealed', '1')",
+  ).run();
+
+  return c.json({ instanceToken: c.get("instanceToken") });
+});
+
+app.route("/api/v1/auth", auth);
+app.route("/api/v1/auth/devices", sessions);
+app.route("/api/v1/vault", vault);
+
+app.get("/api/v1/health", healthHandler);
 
 app.notFound((c) =>
   c.json({ error: { code: ErrorCode.NOT_FOUND, message: "Not found", status: 404 } }, 404),

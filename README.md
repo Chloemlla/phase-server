@@ -58,15 +58,13 @@ Base path: `/api/v1`
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
 | `GET` | `/health` | No | Instance status & initialization check |
-| `POST` | `/auth/register` | No | Create account (single user only) |
-| `POST` | `/auth/login` | No | Login & get JWT token |
+| `POST` | `/auth/init` | Yes (`X-Instance-Token`) | Initialize the vault and create the first session |
+| `POST` | `/auth/unlock` | Yes (`X-Instance-Token`) | Create a new session for an initialized instance |
 | `POST` | `/auth/logout` | Yes | Revoke current session |
-| `POST` | `/auth/change-password` | Yes | Change master password & re-encrypt vault |
 | `GET` | `/vault` | Yes | Get encrypted vault |
 | `PUT` | `/vault` | Yes | Update encrypted vault (optimistic lock) |
-| `DELETE` | `/vault` | Yes | Delete account and all data |
-| `GET` | `/sessions` | Yes | List active sessions |
-| `DELETE` | `/sessions/:id` | Yes | Revoke a session |
+| `GET` | `/auth/devices` | Yes | List active sessions |
+| `DELETE` | `/auth/devices/:id` | Yes | Revoke a session |
 
 See [Client Integration Guide](docs/CLIENT_GUIDE.md) for full API reference, key derivation code, and sync protocol.
 

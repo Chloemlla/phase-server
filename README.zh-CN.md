@@ -58,15 +58,13 @@ bun run dev                        # http://localhost:8787
 | 方法 | 端点 | 认证 | 描述 |
 |------|------|------|------|
 | `GET` | `/health` | 否 | 实例状态和初始化检查 |
-| `POST` | `/auth/register` | 否 | 注册账户（仅允许一个用户） |
-| `POST` | `/auth/login` | 否 | 登录获取 JWT Token |
+| `POST` | `/auth/init` | 是（`X-Instance-Token`） | 初始化 vault 并创建第一个会话 |
+| `POST` | `/auth/unlock` | 是（`X-Instance-Token`） | 为已初始化实例创建新会话 |
 | `POST` | `/auth/logout` | 是 | 登出当前会话 |
-| `POST` | `/auth/change-password` | 是 | 修改主密码并重新加密 vault |
 | `GET` | `/vault` | 是 | 获取加密 vault |
 | `PUT` | `/vault` | 是 | 更新加密 vault（乐观锁） |
-| `DELETE` | `/vault` | 是 | 删除账户及所有数据 |
-| `GET` | `/sessions` | 是 | 列出所有活跃会话 |
-| `DELETE` | `/sessions/:id` | 是 | 撤销指定会话 |
+| `GET` | `/auth/devices` | 是 | 列出所有活跃会话 |
+| `DELETE` | `/auth/devices/:id` | 是 | 撤销指定会话 |
 
 完整 API 文档、密钥派生代码和同步协议请参考 [客户端集成指南](docs/CLIENT_GUIDE.md)。
 
