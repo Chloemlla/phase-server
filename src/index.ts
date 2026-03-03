@@ -18,24 +18,50 @@ app.use("/*", async (c, next) => {
   const middleware = cors({
     origin: origin === "*" ? "*" : origin.split(","),
     allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowHeaders: ["Content-Type", "Authorization", "X-Phase-Instance-Token"],
+    allowHeaders: ["Content-Type", "Authorization", "X-Instance-Token"],
     maxAge: 86400,
   });
   return middleware(c, next);
 });
 
-// Instance Token 保护所有 /api/* 路由（包括 /health）
-app.use("/api/*", instanceTokenMiddleware);
-
-// 自动初始化：建表 + 注入 JWT Secret + instanceSalt
+// 初始化：建表 + 注入 jwtSecret / instanceSalt / instanceToken（必须在 instanceToken 中间件之前）
 app.use("/api/*", async (c, next) => {
-  const { jwtSecret, instanceSalt } = await ensureInitialized(c.env.DB, c.env.JWT_SECRET);
+  const { jwtSecret, instanceSalt, instanceToken } = await ensureInitialized(c.env.DB, c.env.JWT_SECRET);
   c.set("jwtSecret", jwtSecret);
   c.set("instanceSalt", instanceSalt);
+  c.set("instanceToken", instanceToken);
   await next();
 });
 
+// Instance Token 保护所有 /api/* 路由（/setup-token 自身除外）
+app.use("/api/*", instanceTokenMiddleware);
+
 app.use("/api/*", rateLimitMiddleware);
+
+// ─── 一次性取回 Instance Token ───
+// 部署后用浏览器访问一次，拿到 token 后此端点自动关闭
+// 通过 DB 标记 token_revealed = true 实现，之后永远返回 410 Gone
+
+app.get("/api/v1/setup-token", async (c) => {
+  const revealed = await c.env.DB.prepare(
+    "SELECT value FROM config WHERE key = 'token_revealed'",
+  ).first<{ value: string }>();
+
+  if (revealed) {
+    return c.json(
+      { error: { code: ErrorCode.NOT_FOUND, message: "Instance token has already been retrieved. This endpoint is permanently closed.", status: 410 } },
+      410 as any,
+    );
+  }
+
+  // 标记已取回，永久关闭此端点
+  await c.env.DB.prepare(
+    "INSERT OR IGNORE INTO config (key, value) VALUES ('token_revealed', '1')",
+  ).run();
+
+  const instanceToken = c.get("instanceToken");
+  return c.json({ instanceToken });
+});
 
 // ─── 路由挂载 ───
 

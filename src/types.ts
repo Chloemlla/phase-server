@@ -4,14 +4,14 @@ import type { Context } from "hono";
 
 export type Bindings = {
   DB: D1Database;
-  JWT_SECRET?: string;      // 可选：未设置时自动生成并存储在 D1 中
-  INSTANCE_TOKEN?: string;  // 必填（生产环境）：访问令牌，保护所有端点
+  JWT_SECRET?: string;    // 可选：未设置时自动生成并存储在 D1 中
   CORS_ORIGIN: string;
 };
 
 export type Variables = {
   jwtSecret: string;      // 由 init 中间件注入
   instanceSalt: string;   // 由 init 中间件注入，用于客户端 PBKDF2
+  instanceToken: string;  // 由 init 中间件注入，用于校验客户端请求
   sessionId: string;      // 由 authMiddleware 注入
 };
 
