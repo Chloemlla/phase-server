@@ -1,0 +1,13 @@
+*
+!.gitignore
+!.dev.vars.example
+!package.json
+!bun.lock
+!tsconfig.json
+!wrangler.toml
+!README.md
+!README.zh-CN.md
+!src/
+!src/**
+!migrations/
+!migrations/**
