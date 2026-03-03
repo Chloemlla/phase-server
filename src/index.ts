@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import type { AppEnv } from "./types";
 import { ErrorCode } from "./types";
+import { instanceTokenMiddleware } from "./middleware/instanceToken";
 import { rateLimitMiddleware } from "./middleware/rateLimit";
 import { ensureInitialized } from "./utils/init";
 import auth from "./routes/auth";
@@ -17,16 +18,20 @@ app.use("/*", async (c, next) => {
   const middleware = cors({
     origin: origin === "*" ? "*" : origin.split(","),
     allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowHeaders: ["Content-Type", "Authorization"],
+    allowHeaders: ["Content-Type", "Authorization", "X-Phase-Instance-Token"],
     maxAge: 86400,
   });
   return middleware(c, next);
 });
 
-// 自动初始化：建表 + 注入 JWT Secret
+// Instance Token 保护所有 /api/* 路由（包括 /health）
+app.use("/api/*", instanceTokenMiddleware);
+
+// 自动初始化：建表 + 注入 JWT Secret + instanceSalt
 app.use("/api/*", async (c, next) => {
-  const jwtSecret = await ensureInitialized(c.env.DB, c.env.JWT_SECRET);
+  const { jwtSecret, instanceSalt } = await ensureInitialized(c.env.DB, c.env.JWT_SECRET);
   c.set("jwtSecret", jwtSecret);
+  c.set("instanceSalt", instanceSalt);
   await next();
 });
 
@@ -41,11 +46,12 @@ app.route("/api/v1/sessions", sessions);
 // ─── Health check ───
 
 app.get("/api/v1/health", async (c) => {
-  const user = await c.env.DB.prepare("SELECT id FROM users LIMIT 1").first();
+  const row = await c.env.DB.prepare("SELECT id FROM vault WHERE id = 'default'").first();
   return c.json({
     status: "ok" as const,
-    initialized: !!user,
+    initialized: !!row,
     version: "0.1.0",
+    instanceSalt: c.get("instanceSalt"),
   });
 });
 

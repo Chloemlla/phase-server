@@ -13,7 +13,7 @@ export const authMiddleware = createMiddleware<AppEnv>(async (c, next) => {
   }
 
   const token = header.slice(7);
-  let payload: { sub: string; sid: string };
+  let payload: { sid: string };
   try {
     payload = await verifyToken(token, c.get("jwtSecret"));
   } catch {
@@ -26,10 +26,10 @@ export const authMiddleware = createMiddleware<AppEnv>(async (c, next) => {
   // 检查 session 是否仍有效（支持主动撤销）
   const now = Math.floor(Date.now() / 1000);
   const session = await c.env.DB.prepare(
-    "SELECT id FROM sessions WHERE id = ? AND user_id = ? AND expires_at > ?",
+    "SELECT id FROM sessions WHERE id = ? AND expires_at > ?",
   )
-    .bind(payload.sid, payload.sub, now)
-    .first<SessionRow>();
+    .bind(payload.sid, now)
+    .first<Pick<SessionRow, "id">>();
 
   if (!session) {
     return c.json(
@@ -43,7 +43,6 @@ export const authMiddleware = createMiddleware<AppEnv>(async (c, next) => {
     .bind(now, payload.sid)
     .run();
 
-  c.set("userId", payload.sub);
   c.set("sessionId", payload.sid);
   await next();
 });

@@ -1,7 +1,6 @@
 import { Hono } from "hono";
-import type { AppEnv, VaultRow, UserRow, VaultUpdateRequest, DeleteAccountRequest } from "../types";
+import type { AppEnv, VaultRow, VaultUpdateRequest } from "../types";
 import { ErrorCode } from "../types";
-import { verifyPassword } from "../utils/crypto";
 import { success, error } from "../utils/response";
 import { authMiddleware } from "../middleware/auth";
 
@@ -12,8 +11,7 @@ vault.use("/*", authMiddleware);
 // ─── GET / ───
 
 vault.get("/", async (c) => {
-  const row = await c.env.DB.prepare("SELECT * FROM vaults WHERE user_id = ?")
-    .bind(c.get("userId"))
+  const row = await c.env.DB.prepare("SELECT * FROM vault WHERE id = 'default'")
     .first<VaultRow>();
 
   if (!row) {
@@ -35,21 +33,18 @@ vault.put("/", async (c) => {
     return error(c, ErrorCode.INVALID_REQUEST, "Missing required fields: encryptedVault, expectedVersion", 400);
   }
 
-  const userId = c.get("userId");
   const now = Math.floor(Date.now() / 1000);
   const newVersion = body.expectedVersion + 1;
 
   // 乐观锁：只有 version 匹配时才更新
   const result = await c.env.DB.prepare(
-    "UPDATE vaults SET encrypted_data = ?, version = ?, updated_at = ? WHERE user_id = ? AND version = ?",
+    "UPDATE vault SET encrypted_data = ?, version = ?, updated_at = ? WHERE id = 'default' AND version = ?",
   )
-    .bind(body.encryptedVault, newVersion, now, userId, body.expectedVersion)
+    .bind(body.encryptedVault, newVersion, now, body.expectedVersion)
     .run();
 
   if (!result.meta.changes) {
-    // 版本冲突：返回当前版本让客户端合并
-    const current = await c.env.DB.prepare("SELECT version FROM vaults WHERE user_id = ?")
-      .bind(userId)
+    const current = await c.env.DB.prepare("SELECT version FROM vault WHERE id = 'default'")
       .first<{ version: number }>();
 
     return error(
@@ -64,33 +59,6 @@ vault.put("/", async (c) => {
     version: newVersion,
     updatedAt: new Date(now * 1000).toISOString(),
   });
-});
-
-// ─── DELETE / ───
-
-vault.delete("/", async (c) => {
-  const body = await c.req.json<DeleteAccountRequest>().catch(() => null);
-  if (!body?.authHash) {
-    return error(c, ErrorCode.INVALID_REQUEST, "Password confirmation required", 400);
-  }
-
-  const userId = c.get("userId");
-  const user = await c.env.DB.prepare("SELECT * FROM users WHERE id = ?")
-    .bind(userId)
-    .first<UserRow>();
-
-  if (!user || !(await verifyPassword(body.authHash, user.auth_hash))) {
-    return error(c, ErrorCode.UNAUTHORIZED, "Password is incorrect", 401);
-  }
-
-  // 删除所有关联数据
-  await c.env.DB.batch([
-    c.env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(userId),
-    c.env.DB.prepare("DELETE FROM vaults WHERE user_id = ?").bind(userId),
-    c.env.DB.prepare("DELETE FROM users WHERE id = ?").bind(userId),
-  ]);
-
-  return success(c, { success: true });
 });
 
 export default vault;

@@ -8,9 +8,8 @@ interface RateLimitConfig {
 }
 
 const RATE_LIMITS: Record<string, RateLimitConfig> = {
-  "/api/v1/auth/login": { limit: 5, windowSeconds: 15 * 60 },
-  "/api/v1/auth/register": { limit: 3, windowSeconds: 60 * 60 },
-  "/api/v1/auth/change-password": { limit: 10, windowSeconds: 60 },
+  "/api/v1/auth/setup": { limit: 3, windowSeconds: 60 * 60 },
+  "/api/v1/auth/open": { limit: 5, windowSeconds: 15 * 60 },
   "/api/v1/auth/logout": { limit: 10, windowSeconds: 60 },
 };
 
