@@ -1,7 +1,8 @@
 import { createMiddleware } from "hono/factory";
-import type { AppEnv, SessionRow } from "../types";
+import type { AppEnv } from "../types";
 import { ErrorCode } from "../types";
 import { verifyToken } from "../utils/crypto";
+import prisma from "../prisma";
 
 export const authMiddleware = createMiddleware<AppEnv>(async (c, next) => {
   const header = c.req.header("Authorization");
@@ -15,7 +16,7 @@ export const authMiddleware = createMiddleware<AppEnv>(async (c, next) => {
   const token = header.slice(7);
   let payload: { sid: string };
   try {
-    payload = await verifyToken(token, c.get("jwtSecret"));
+    payload = verifyToken(token, c.get("jwtSecret"));
   } catch {
     return c.json(
       { error: { code: ErrorCode.UNAUTHORIZED, message: "Invalid or expired token", status: 401 } },
@@ -25,11 +26,13 @@ export const authMiddleware = createMiddleware<AppEnv>(async (c, next) => {
 
   // 检查 session 是否仍有效（支持主动撤销）
   const now = Math.floor(Date.now() / 1000);
-  const session = await c.env.DB.prepare(
-    "SELECT id FROM sessions WHERE id = ? AND expires_at > ?",
-  )
-    .bind(payload.sid, now)
-    .first<Pick<SessionRow, "id">>();
+  const session = await prisma.session.findFirst({
+    where: {
+      id: payload.sid,
+      expiresAt: { gt: now },
+    },
+    select: { id: true },
+  });
 
   if (!session) {
     return c.json(
@@ -39,9 +42,10 @@ export const authMiddleware = createMiddleware<AppEnv>(async (c, next) => {
   }
 
   // 更新 last_used_at
-  await c.env.DB.prepare("UPDATE sessions SET last_used_at = ? WHERE id = ?")
-    .bind(now, payload.sid)
-    .run();
+  await prisma.session.update({
+    where: { id: payload.sid },
+    data: { lastUsedAt: now },
+  });
 
   c.set("sessionId", payload.sid);
   await next();

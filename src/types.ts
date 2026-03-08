@@ -1,12 +1,6 @@
 import type { Context } from "hono";
 
-// ─── Cloudflare Bindings ───
-
-export type Bindings = {
-  DB: D1Database;
-  JWT_SECRET?: string;    // 可选：未设置时自动生成并存储在 D1 中
-  CORS_ORIGIN: string;
-};
+// ─── App Context ───
 
 export type Variables = {
   jwtSecret: string;      // 由 init 中间件注入
@@ -15,7 +9,7 @@ export type Variables = {
   sessionId: string;      // 由 authMiddleware 注入
 };
 
-export type AppEnv = { Bindings: Bindings; Variables: Variables };
+export type AppEnv = { Variables: Variables };
 export type AppContext = Context<AppEnv>;
 
 // ─── API 请求 ───
@@ -60,24 +54,6 @@ export interface SessionInfo {
   createdAt: number;
   lastUsedAt: number;
   isCurrent: boolean;
-}
-
-// ─── DB 行类型 ───
-
-export interface VaultRow {
-  id: string;
-  encrypted_data: string;
-  version: number;
-  updated_at: number;
-}
-
-export interface SessionRow {
-  id: string;
-  device_name: string;
-  ip_address: string | null;
-  created_at: number;
-  last_used_at: number;
-  expires_at: number;
 }
 
 // ─── 错误码 ───

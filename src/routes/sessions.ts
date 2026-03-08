@@ -1,8 +1,9 @@
 import { Hono } from "hono";
-import type { AppEnv, SessionRow, SessionInfo } from "../types";
+import type { AppEnv, SessionInfo } from "../types";
 import { ErrorCode } from "../types";
 import { success, error } from "../utils/response";
 import { authMiddleware } from "../middleware/auth";
+import prisma from "../prisma";
 
 const sessions = new Hono<AppEnv>();
 
@@ -14,18 +15,17 @@ sessions.get("/", async (c) => {
   const currentSessionId = c.get("sessionId");
   const now = Math.floor(Date.now() / 1000);
 
-  const rows = await c.env.DB.prepare(
-    "SELECT * FROM sessions WHERE expires_at > ? ORDER BY last_used_at DESC",
-  )
-    .bind(now)
-    .all<SessionRow>();
+  const rows = await prisma.session.findMany({
+    where: { expiresAt: { gt: now } },
+    orderBy: { lastUsedAt: "desc" },
+  });
 
-  const list: SessionInfo[] = (rows.results ?? []).map((s) => ({
+  const list: SessionInfo[] = rows.map((s) => ({
     id: s.id,
-    deviceName: s.device_name,
-    ipAddress: s.ip_address,
-    createdAt: s.created_at,
-    lastUsedAt: s.last_used_at,
+    deviceName: s.deviceName,
+    ipAddress: s.ipAddress,
+    createdAt: s.createdAt,
+    lastUsedAt: s.lastUsedAt,
     isCurrent: s.id === currentSessionId,
   }));
 
@@ -42,11 +42,9 @@ sessions.delete("/:id", async (c) => {
     return error(c, ErrorCode.INVALID_REQUEST, "Cannot revoke current session. Use logout instead.", 400);
   }
 
-  const result = await c.env.DB.prepare("DELETE FROM sessions WHERE id = ?")
-    .bind(sessionId)
-    .run();
-
-  if (!result.meta.changes) {
+  try {
+    await prisma.session.delete({ where: { id: sessionId } });
+  } catch {
     return error(c, ErrorCode.NOT_FOUND, "Session not found", 404);
   }
 

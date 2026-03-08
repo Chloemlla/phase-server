@@ -1,0 +1,50 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+/// 键值配置表（jwt_secret / instance_salt / instance_token 等）
+model Config {
+  key   String @id
+  value String
+
+  @@map("config")
+}
+
+/// 加密保险库（单实例单 vault，id 固定为 'default'）
+model Vault {
+  id            String @id @default("default")
+  encryptedData String @map("encrypted_data")
+  version       Int    @default(1)
+  updatedAt     Int    @map("updated_at")
+
+  @@map("vault")
+}
+
+/// 会话表
+model Session {
+  id         String  @id @default(uuid())
+  deviceName String  @default("") @map("device_name")
+  ipAddress  String? @map("ip_address")
+  createdAt  Int     @map("created_at")
+  lastUsedAt Int     @map("last_used_at")
+  expiresAt  Int     @map("expires_at")
+
+  @@index([expiresAt], name: "idx_sessions_expires_at")
+  @@map("sessions")
+}
+
+/// IP 限速表（复合主键：key + windowStart）
+model RateLimit {
+  key         String @map("key")
+  count       Int    @default(1)
+  windowStart Int    @map("window_start")
+
+  @@id([key, windowStart])
+  @@index([windowStart], name: "idx_rate_limits_window")
+  @@map("rate_limits")
+}

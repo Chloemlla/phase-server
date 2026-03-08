@@ -1,54 +1,61 @@
 # Phase Server
 
-自托管的端到端加密 2FA 令牌管理器后端。基于 Cloudflare Workers + D1 免费计划。
-
-[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/5uki/phase-server)
+自托管的端到端加密 2FA 令牌管理器后端。基于 TypeScript + Hono + Prisma。
 
 > **Phase 客户端**（Tauri 2.0 + React）→ [phase-client](https://github.com/5uki/phase-client)
 
 ## 特性
 
 - **零知识服务端** — 所有加解密在客户端完成，服务端只存储密文，无法解密任何数据。
-- **零成本** — 完全运行在 Cloudflare 免费计划上（Workers + D1）。
-- **一键部署** — 点击上方按钮即可完成部署，无需任何手动配置。
+- **自托管** — 可运行在任何支持 Node.js 的平台（VPS、Docker 等）。
 - **多设备同步** — 基于版本号的乐观锁，自动检测冲突。
 - **防暴力破解** — 基于 IP 的请求限速。
 - **会话管理** — JWT 认证，支持多设备登录和会话撤销。
+- **Prisma ORM** — 类型安全的数据库访问，可轻松切换 SQLite / PostgreSQL / MySQL。
 
 ## 技术栈
 
 | 组件 | 技术 |
 |------|------|
-| 运行时 | Cloudflare Workers |
-| 数据库 | Cloudflare D1 (SQLite) |
+| 运行时 | Node.js |
+| 数据库 | SQLite（默认，通过 Prisma） |
+| ORM | Prisma |
 | Web 框架 | Hono |
 | 语言 | TypeScript |
-| 包管理器 | Bun |
+| 包管理器 | pnpm |
 
 ## 快速开始
-
-### 一键部署
-
-点击顶部的 **Deploy to Cloudflare Workers** 按钮，按提示连接你的 GitHub 和 Cloudflare 账号即可。
-
-服务端会在首次请求时自动初始化数据库表结构并生成 JWT Secret，无需任何手动配置。
-
-### 手动部署（可选）
-
-```bash
-git clone https://github.com/5uki/phase-server.git
-cd phase-server
-bun install
-bunx wrangler d1 create phase-db   # 将 database_id 填入 wrangler.toml
-bun run deploy
-```
 
 ### 本地开发
 
 ```bash
-bun install
-cp .dev.vars.example .dev.vars     # 可选：设置自定义 JWT_SECRET
-bun run dev                        # http://localhost:8787
+git clone https://github.com/5uki/phase-server.git
+cd phase-server
+pnpm install
+cp .env.example .env          # 按需修改
+pnpm exec prisma db push      # 创建 SQLite 数据库和表
+pnpm dev                      # http://localhost:3000
+```
+
+### Docker 部署
+
+```bash
+docker build -t phase-server .
+docker run -d \
+  -p 3000:3000 \
+  -v phase-data:/app/prisma \
+  -e DATABASE_URL="file:./phase.db" \
+  -e CORS_ORIGIN="*" \
+  phase-server
+```
+
+### 生产部署
+
+```bash
+pnpm install
+pnpm exec prisma db push
+pnpm build
+pnpm start
 ```
 
 ## API 概览
@@ -86,43 +93,45 @@ bun run dev                        # http://localhost:8787
 - 即使数据库被完全泄露，令牌数据仍然是加密的。
 - 完整威胁模型请参考 [设计文档](docs/plans/design.md)。
 
+## 环境变量
+
+| 变量 | 默认值 | 描述 |
+|------|--------|------|
+| `DATABASE_URL` | `file:./phase.db` | Prisma 数据库连接字符串 |
+| `JWT_SECRET` | （自动生成） | JWT 签名密钥 |
+| `CORS_ORIGIN` | `*` | 允许的 CORS 来源（逗号分隔） |
+| `PORT` | `3000` | 服务监听端口 |
+
 ## 项目结构
 
 ```
 phase-server/
 ├── src/
-│   ├── index.ts              # 入口，Hono 应用定义
+│   ├── index.ts              # 入口，Hono 应用 + 服务启动
+│   ├── prisma.ts             # PrismaClient 单例
 │   ├── types.ts              # 所有类型定义
 │   ├── routes/
-│   │   ├── auth.ts           # 注册、登录、登出、改密
+│   │   ├── auth.ts           # 注册、登录、登出
 │   │   ├── vault.ts          # Vault CRUD + 乐观锁
 │   │   └── sessions.ts       # 会话列表和撤销
 │   ├── middleware/
 │   │   ├── auth.ts           # JWT 验证 + 会话有效性检查
+│   │   ├── instanceToken.ts  # 实例令牌验证
 │   │   └── rateLimit.ts      # 基于 IP 的限速
 │   └── utils/
-│       ├── crypto.ts         # 密码哈希、JWT 工具
+│       ├── crypto.ts         # JWT 工具
+│       ├── init.ts           # 自动初始化逻辑
 │       └── response.ts       # 统一响应工具
-├── migrations/
-│   └── 0001_initial.sql      # D1 初始 Schema
-├── docs/
-│   ├── CLIENT_GUIDE.md       # 客户端集成指南
-│   └── plans/
-│       ├── requirements.md   # 需求文档
-│       └── design.md         # 技术设计文档
-├── wrangler.toml             # Workers 配置
+├── prisma/
+│   └── schema.prisma         # 数据库 Schema
+├── .github/
+│   └── workflows/
+│       └── setup.yml         # CI：安装依赖、生成代码、类型检查
+├── Dockerfile
+├── .env.example
 ├── package.json
 └── tsconfig.json
 ```
-
-## Cloudflare 免费计划用量
-
-| 资源 | 免费额度 | 个人使用量 |
-|------|---------|-----------|
-| Workers 请求 | 10 万次/天 | < 100 次/天 |
-| D1 读取行数 | 500 万/天 | < 1000/天 |
-| D1 写入行数 | 10 万/天 | < 100/天 |
-| D1 存储 | 5 GB | < 1 MB |
 
 ## 许可证
 

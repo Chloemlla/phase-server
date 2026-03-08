@@ -1,21 +1,29 @@
 {
   "name": "phase-server",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
+  "packageManager": "pnpm@9.15.0",
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
-    "db:create": "wrangler d1 create phase-db",
-    "db:migrate:local": "wrangler d1 migrations apply phase-db --local",
-    "db:migrate:prod": "wrangler d1 migrations apply phase-db --remote",
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "db:migrate": "prisma migrate dev",
+    "db:studio": "prisma studio",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "hono": "^4.7.0"
+    "@hono/node-server": "^1.13.0",
+    "@prisma/client": "^6.4.0",
+    "hono": "^4.7.0",
+    "jsonwebtoken": "^9.0.0"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20250224.0",
-    "typescript": "^5.7.0",
-    "wrangler": "^4.0.0"
+    "@types/jsonwebtoken": "^9.0.0",
+    "@types/node": "^22.0.0",
+    "prisma": "^6.4.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
   }
 }

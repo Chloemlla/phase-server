@@ -1,6 +1,7 @@
 import { createMiddleware } from "hono/factory";
 import type { AppEnv } from "../types";
 import { ErrorCode } from "../types";
+import prisma from "../prisma";
 
 interface RateLimitConfig {
   limit: number;
@@ -22,16 +23,16 @@ export const rateLimitMiddleware = createMiddleware<AppEnv>(async (c, next) => {
   if (path === "/api/v1/health") return next();
 
   const config = RATE_LIMITS[path] ?? DEFAULT_LIMIT;
-  const ip = c.req.header("cf-connecting-ip") ?? c.req.header("x-forwarded-for") ?? "unknown";
+  const ip = c.req.header("x-forwarded-for")?.split(",")[0]?.trim()
+    ?? c.req.header("x-real-ip")
+    ?? "unknown";
   const now = Math.floor(Date.now() / 1000);
   const windowStart = Math.floor(now / config.windowSeconds) * config.windowSeconds;
   const key = `${ip}:${path}`;
 
-  const row = await c.env.DB.prepare(
-    "SELECT count FROM rate_limits WHERE key = ? AND window_start = ?",
-  )
-    .bind(key, windowStart)
-    .first<{ count: number }>();
+  const row = await prisma.rateLimit.findUnique({
+    where: { key_windowStart: { key, windowStart } },
+  });
 
   if (row && row.count >= config.limit) {
     const retryAfter = windowStart + config.windowSeconds - now;
@@ -43,18 +44,17 @@ export const rateLimitMiddleware = createMiddleware<AppEnv>(async (c, next) => {
   }
 
   // 递增计数（upsert）
-  await c.env.DB.prepare(
-    `INSERT INTO rate_limits (key, count, window_start) VALUES (?, 1, ?)
-     ON CONFLICT(key, window_start) DO UPDATE SET count = count + 1`,
-  )
-    .bind(key, windowStart)
-    .run();
+  await prisma.rateLimit.upsert({
+    where: { key_windowStart: { key, windowStart } },
+    update: { count: { increment: 1 } },
+    create: { key, count: 1, windowStart },
+  });
 
   // 1% 概率清理过期记录
   if (Math.random() < 0.01) {
-    await c.env.DB.prepare("DELETE FROM rate_limits WHERE window_start < ?")
-      .bind(now - 3600)
-      .run();
+    await prisma.rateLimit.deleteMany({
+      where: { windowStart: { lt: now - 3600 } },
+    });
   }
 
   await next();

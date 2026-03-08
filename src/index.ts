@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { serve } from "@hono/node-server";
 import { instanceTokenMiddleware } from "./middleware/instanceToken";
 import { rateLimitMiddleware } from "./middleware/rateLimit";
 import auth from "./routes/auth";
@@ -8,11 +9,12 @@ import vault from "./routes/vault";
 import type { AppContext, AppEnv } from "./types";
 import { ErrorCode } from "./types";
 import { ensureInitialized } from "./utils/init";
+import prisma from "./prisma";
 
 const app = new Hono<AppEnv>();
 
 app.use("/*", async (c, next) => {
-  const origin = c.env.CORS_ORIGIN ?? "*";
+  const origin = process.env.CORS_ORIGIN ?? "*";
   const middleware = cors({
     origin: origin === "*" ? "*" : origin.split(","),
     allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
@@ -23,7 +25,7 @@ app.use("/*", async (c, next) => {
 });
 
 app.use("/api/*", async (c, next) => {
-  const { jwtSecret, instanceSalt, instanceToken } = await ensureInitialized(c.env.DB, c.env.JWT_SECRET);
+  const { jwtSecret, instanceSalt, instanceToken } = await ensureInitialized(process.env.JWT_SECRET);
   c.set("jwtSecret", jwtSecret);
   c.set("instanceSalt", instanceSalt);
   c.set("instanceToken", instanceToken);
@@ -34,19 +36,19 @@ app.use("/api/*", instanceTokenMiddleware);
 app.use("/api/*", rateLimitMiddleware);
 
 async function healthHandler(c: AppContext) {
-  const row = await c.env.DB.prepare("SELECT id FROM vault WHERE id = 'default'").first();
+  const row = await prisma.vault.findUnique({ where: { id: "default" }, select: { id: true } });
   return c.json({
     status: "ok" as const,
     initialized: !!row,
-    version: "0.1.0",
+    version: "0.2.0",
     instanceSalt: c.get("instanceSalt"),
   });
 }
 
 app.get("/", async (c) => {
   try {
-    const { instanceSalt } = await ensureInitialized(c.env.DB, c.env.JWT_SECRET);
-    const row = await c.env.DB.prepare("SELECT id FROM vault WHERE id = 'default'").first();
+    const { instanceSalt } = await ensureInitialized(process.env.JWT_SECRET);
+    const row = await prisma.vault.findUnique({ where: { id: "default" }, select: { id: true } });
 
     return c.json({
       status: "ok" as const,
@@ -70,9 +72,7 @@ app.get("/", async (c) => {
 });
 
 app.get("/api/v1/setup-token", async (c) => {
-  const revealed = await c.env.DB.prepare(
-    "SELECT value FROM config WHERE key = 'token_revealed'",
-  ).first<{ value: string }>();
+  const revealed = await prisma.config.findUnique({ where: { key: "token_revealed" } });
 
   if (revealed) {
     return c.json(
@@ -87,9 +87,11 @@ app.get("/api/v1/setup-token", async (c) => {
     );
   }
 
-  await c.env.DB.prepare(
-    "INSERT OR IGNORE INTO config (key, value) VALUES ('token_revealed', '1')",
-  ).run();
+  await prisma.config.upsert({
+    where: { key: "token_revealed" },
+    update: {},
+    create: { key: "token_revealed", value: "1" },
+  });
 
   return c.json({ instanceToken: c.get("instanceToken") });
 });
@@ -112,4 +114,13 @@ app.onError((err, c) => {
   );
 });
 
-export default app;
+// ─── 启动服务 ───
+
+const port = Number(process.env.PORT) || 3000;
+
+serve({
+  fetch: app.fetch,
+  port,
+}, (info) => {
+  console.log(`Phase server running on http://localhost:${info.port}`);
+});
