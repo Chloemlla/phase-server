@@ -6,6 +6,7 @@ on:
     paths:
       - 'package.json'
       - 'prisma/schema.prisma'
+  workflow_dispatch:
 
 permissions:
   contents: write
