@@ -3,8 +3,7 @@ name: Build Docker Image For Linux AMD64
 on:
   push:
     branches:
-      - main
-      - dev
+      - master
     paths-ignore:
       - .github/**
       - "!.github/workflows/docker-amd64.yml"
