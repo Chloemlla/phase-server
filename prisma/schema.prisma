@@ -3,13 +3,13 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "mongodb"
   url      = env("DATABASE_URL")
 }
 
 /// 键值配置表（jwt_secret / instance_salt / instance_token 等）
 model Config {
-  key   String @id
+  key   String @id @map("_id")
   value String
 
   @@map("config")
@@ -17,7 +17,7 @@ model Config {
 
 /// 加密保险库（单实例单 vault，id 固定为 'default'）
 model Vault {
-  id            String @id @default("default")
+  id            String @id @default("default") @map("_id")
   encryptedData String @map("encrypted_data")
   version       Int    @default(1)
   updatedAt     Int    @map("updated_at")
@@ -27,7 +27,7 @@ model Vault {
 
 /// 会话表
 model Session {
-  id         String  @id @default(uuid())
+  id         String  @id @default(uuid()) @map("_id")
   deviceName String  @default("") @map("device_name")
   ipAddress  String? @map("ip_address")
   createdAt  Int     @map("created_at")
@@ -38,33 +38,33 @@ model Session {
   @@map("sessions")
 }
 
-/// IP 限速表（复合主键：key + windowStart）
+/// IP 限速表（原来是复合主键：key + windowStart，MongoDB 中转为 unique 索引）
 model RateLimit {
+  id          String @id @default(auto()) @map("_id") @db.ObjectId
   key         String @map("key")
   count       Int    @default(1)
   windowStart Int    @map("window_start")
 
-  @@id([key, windowStart])
+  @@unique([key, windowStart])
   @@index([windowStart], name: "idx_rate_limits_window")
   @@map("rate_limits")
 }
 
 /// 激活码表
 model ActivationCode {
-  id             String  @id @default(uuid())
+  id             String  @id @default(uuid()) @map("_id")
   code           String  @unique                    // 激活码字符串
   membershipDays Int     @map("membership_days")    // 激活后赋予的会员天数
   note           String  @default("")               // 备注（可选）
   usedAt         Int?    @map("used_at")            // 使用时间（null 表示未使用）
   createdAt      Int     @map("created_at")
 
-  @@index([code], name: "idx_activation_codes_code")
   @@map("activation_codes")
 }
 
 /// 会员状态表（单实例单行，id 固定为 'default'）
 model Membership {
-  id        String @id @default("default")
+  id        String @id @default("default") @map("_id")
   expiresAt Int    @map("expires_at")               // 会员到期时间（Unix 秒）
   updatedAt Int    @map("updated_at")
 
