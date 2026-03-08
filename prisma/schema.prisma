@@ -48,3 +48,25 @@ model RateLimit {
   @@index([windowStart], name: "idx_rate_limits_window")
   @@map("rate_limits")
 }
+
+/// 激活码表
+model ActivationCode {
+  id             String  @id @default(uuid())
+  code           String  @unique                    // 激活码字符串
+  membershipDays Int     @map("membership_days")    // 激活后赋予的会员天数
+  note           String  @default("")               // 备注（可选）
+  usedAt         Int?    @map("used_at")            // 使用时间（null 表示未使用）
+  createdAt      Int     @map("created_at")
+
+  @@index([code], name: "idx_activation_codes_code")
+  @@map("activation_codes")
+}
+
+/// 会员状态表（单实例单行，id 固定为 'default'）
+model Membership {
+  id        String @id @default("default")
+  expiresAt Int    @map("expires_at")               // 会员到期时间（Unix 秒）
+  updatedAt Int    @map("updated_at")
+
+  @@map("membership")
+}
