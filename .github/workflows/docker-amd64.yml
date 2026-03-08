@@ -60,13 +60,6 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@master
-        with:
-          registry: ghcr.io
-          username: ${{ secrets.GHCR_USERNAME }}
-          password: ${{ secrets.USER_PAT }}
-
       - name: Prepare buildx cache dirs
         run: |
           mkdir -p /tmp/.buildx-cache
@@ -88,21 +81,13 @@ jobs:
             type=local,src=/tmp/.buildx-cache
             type=gha
             type=registry,ref=happyclo/phase-server:cache
-            type=registry,ref=ghcr.io/${{ steps.meta.outputs.lower_repo }}:cache
           cache-to: |
             type=local,dest=/tmp/.buildx-cache-new,mode=max
             type=gha,mode=max
             type=registry,ref=happyclo/phase-server:cache,mode=max
-            type=registry,ref=ghcr.io/${{ steps.meta.outputs.lower_repo }}:cache,mode=max
           tags: |
             happyclo/phase-server:${{ github.ref_name }}-amd64
             happyclo/phase-server:${{ steps.meta.outputs.short_sha }}-amd64
-
-      # ghcr.io/${{ steps.meta.outputs.lower_repo }}:${{ github.ref_name }}-amd64
-      # ghcr.io/${{ steps.meta.outputs.lower_repo }}:${{ steps.meta.outputs.short_sha }}-amd64
-      # ghcr.io/${{ steps.meta.outputs.lower_repo }}:${{ github.ref_name }}
-      # ghcr.io/${{ steps.meta.outputs.lower_repo }}:${{ steps.meta.outputs.short_sha }}
-      # ghcr.io/${{ steps.meta.outputs.lower_repo }}:latest
 
       # - name: Move cache
       #   run: |
