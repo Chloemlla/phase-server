@@ -28,6 +28,16 @@ export interface VaultUpdateRequest {
   expectedVersion: number;
 }
 
+export interface CreateActivationCodeRequest {
+  membershipDays: number;   // 激活后赋予的会员天数
+  count?: number;           // 批量创建数量（默认 1，最大 50）
+  note?: string;            // 备注
+}
+
+export interface RedeemActivationCodeRequest {
+  code: string;
+}
+
 // ─── API 响应 ───
 
 export interface HealthResponse {
@@ -56,6 +66,13 @@ export interface SessionInfo {
   isCurrent: boolean;
 }
 
+export interface MembershipStatusResponse {
+  active: boolean;
+  expiresAt: number | null;
+  expiresAtISO: string | null;
+  remainingDays: number;
+}
+
 // ─── 错误码 ───
 
 export const ErrorCode = {
@@ -63,6 +80,8 @@ export const ErrorCode = {
   UNAUTHORIZED: "UNAUTHORIZED",
   FORBIDDEN: "FORBIDDEN",
   NOT_FOUND: "NOT_FOUND",
+  ACTIVATION_CODE_USED: "ACTIVATION_CODE_USED",
+  ACTIVATION_CODE_NOT_FOUND: "ACTIVATION_CODE_NOT_FOUND",
   VAULT_VERSION_CONFLICT: "VAULT_VERSION_CONFLICT",
   ALREADY_INITIALIZED: "ALREADY_INITIALIZED",
   RATE_LIMITED: "RATE_LIMITED",

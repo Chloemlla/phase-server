@@ -6,6 +6,7 @@ import { rateLimitMiddleware } from "./middleware/rateLimit";
 import auth from "./routes/auth";
 import sessions from "./routes/sessions";
 import vault from "./routes/vault";
+import activationCodes from "./routes/activationCodes";
 import type { AppContext, AppEnv } from "./types";
 import { ErrorCode } from "./types";
 import { ensureInitialized } from "./utils/init";
@@ -37,11 +38,19 @@ app.use("/api/*", rateLimitMiddleware);
 
 async function healthHandler(c: AppContext) {
   const row = await prisma.vault.findUnique({ where: { id: "default" }, select: { id: true } });
+  const membership = await prisma.membership.findUnique({ where: { id: "default" } });
+  const now = Math.floor(Date.now() / 1000);
+  const membershipActive = membership ? membership.expiresAt > now : false;
+
   return c.json({
     status: "ok" as const,
     initialized: !!row,
-    version: "0.2.0",
+    version: "0.3.0",
     instanceSalt: c.get("instanceSalt"),
+    membership: {
+      active: membershipActive,
+      expiresAt: membership?.expiresAt ?? null,
+    },
   });
 }
 
@@ -99,6 +108,7 @@ app.get("/api/v1/setup-token", async (c) => {
 app.route("/api/v1/auth", auth);
 app.route("/api/v1/auth/devices", sessions);
 app.route("/api/v1/vault", vault);
+app.route("/api/v1/activation-codes", activationCodes);
 
 app.get("/api/v1/health", healthHandler);
 
