@@ -17,7 +17,13 @@ activationCodes.use("/*", authMiddleware);
 function generateCode(length = 16): string {
     const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // 排除易混淆字符 I/1/O/0
     const buf = new Uint8Array(length);
-    crypto.getRandomValues(buf);
+    if (typeof crypto.getRandomValues === "function") {
+        crypto.getRandomValues(buf);
+    } else if (crypto.webcrypto && typeof crypto.webcrypto.getRandomValues === "function") {
+        crypto.webcrypto.getRandomValues(buf);
+    } else {
+        (crypto as any).randomFillSync(buf); // Fallback for Node 18 or older
+    }
     return Array.from(buf)
         .map((b) => chars[b % chars.length])
         .join("")
@@ -36,11 +42,18 @@ interface CreateCodeRequest {
 activationCodes.post("/", async (c) => {
     const body = await c.req.json<CreateCodeRequest>().catch(() => null);
 
-    if (!body?.membershipDays || typeof body.membershipDays !== "number" || body.membershipDays <= 0) {
+    if (!body?.membershipDays || typeof body.membershipDays !== "number" || !Number.isInteger(body.membershipDays) || body.membershipDays <= 0) {
         return error(c, ErrorCode.INVALID_REQUEST, "membershipDays must be a positive integer", 400);
     }
+    if (body.membershipDays > 36500) {
+        return error(c, ErrorCode.INVALID_REQUEST, "membershipDays must not exceed 36500", 400);
+    }
 
-    const count = Math.min(Math.max(body.count ?? 1, 1), 50);
+    const requestedCount = Number(body.count ?? 1);
+    if (Number.isNaN(requestedCount)) {
+        return error(c, ErrorCode.INVALID_REQUEST, "count must be a valid number", 400);
+    }
+    const count = Math.min(Math.max(Math.floor(requestedCount), 1), 50);
     const now = Math.floor(Date.now() / 1000);
 
     const codes = Array.from({ length: count }, () => ({
@@ -68,6 +81,11 @@ activationCodes.post("/", async (c) => {
 
 activationCodes.get("/", async (c) => {
     const status = c.req.query("status"); // "unused" | "used" | undefined (all)
+    const limitQuery = Number(c.req.query("limit") ?? 100);
+    const offsetQuery = Number(c.req.query("offset") ?? 0);
+
+    const limit = Number.isNaN(limitQuery) ? 100 : Math.min(Math.max(limitQuery, 1), 500);
+    const offset = Number.isNaN(offsetQuery) ? 0 : Math.max(offsetQuery, 0);
 
     const where = status === "unused"
         ? { usedAt: null }
@@ -78,7 +96,11 @@ activationCodes.get("/", async (c) => {
     const rows = await prisma.activationCode.findMany({
         where,
         orderBy: { createdAt: "desc" },
+        take: limit,
+        skip: offset,
     });
+
+    const total = await prisma.activationCode.count({ where });
 
     return success(c, {
         codes: rows.map((row) => ({
@@ -90,6 +112,7 @@ activationCodes.get("/", async (c) => {
             usedAt: row.usedAt,
             createdAt: row.createdAt,
         })),
+        pagination: { total, limit, offset },
     });
 });
 
@@ -126,57 +149,71 @@ activationCodes.post("/redeem", async (c) => {
     // 标准化：去掉空格，统一大写
     const normalizedCode = body.code.replace(/\s/g, "").toUpperCase();
 
-    const codeRow = await prisma.activationCode.findUnique({
-        where: { code: normalizedCode },
-    });
+    try {
+        const result = await prisma.$transaction(async (tx) => {
+            const codeRow = await tx.activationCode.findUnique({
+                where: { code: normalizedCode },
+            });
 
-    if (!codeRow) {
-        return error(c, ErrorCode.NOT_FOUND, "Invalid activation code", 404);
+            if (!codeRow) {
+                throw new Error("NOT_FOUND");
+            }
+
+            if (codeRow.usedAt !== null) {
+                throw new Error("ALREADY_USED");
+            }
+
+            const now = Math.floor(Date.now() / 1000);
+            const daysInSeconds = codeRow.membershipDays * 24 * 3600;
+
+            // 查看当前会员状态
+            const currentMembership = await tx.membership.findUnique({
+                where: { id: "default" },
+            });
+
+            // 如果当前会员有效且未过期，在现有到期时间上叠加；否则从现在开始计算
+            const baseTime = currentMembership && currentMembership.expiresAt > now
+                ? currentMembership.expiresAt
+                : now;
+            const newExpiresAt = baseTime + daysInSeconds;
+
+            // 标记激活码已使用
+            await tx.activationCode.update({
+                where: { id: codeRow.id },
+                data: { usedAt: now },
+            });
+
+            // 更新会员到期时间
+            await tx.membership.upsert({
+                where: { id: "default" },
+                update: {
+                    expiresAt: newExpiresAt,
+                    updatedAt: now,
+                },
+                create: {
+                    id: "default",
+                    expiresAt: newExpiresAt,
+                    updatedAt: now,
+                },
+            });
+
+            return { newExpiresAt, membershipDays: codeRow.membershipDays };
+        });
+
+        return success(c, {
+            membershipExpiresAt: result.newExpiresAt,
+            membershipDaysAdded: result.membershipDays,
+            membershipExpiresAtISO: new Date(result.newExpiresAt * 1000).toISOString(),
+        });
+    } catch (err: any) {
+        if (err.message === "NOT_FOUND") {
+            return error(c, ErrorCode.NOT_FOUND, "Invalid activation code", 404);
+        }
+        if (err.message === "ALREADY_USED") {
+            return error(c, ErrorCode.INVALID_REQUEST, "This activation code has already been used", 400);
+        }
+        throw err;
     }
-
-    if (codeRow.usedAt !== null) {
-        return error(c, ErrorCode.INVALID_REQUEST, "This activation code has already been used", 400);
-    }
-
-    const now = Math.floor(Date.now() / 1000);
-    const daysInSeconds = codeRow.membershipDays * 24 * 3600;
-
-    // 查看当前会员状态
-    const currentMembership = await prisma.membership.findUnique({
-        where: { id: "default" },
-    });
-
-    // 如果当前会员有效且未过期，在现有到期时间上叠加；否则从现在开始计算
-    const baseTime = currentMembership && currentMembership.expiresAt > now
-        ? currentMembership.expiresAt
-        : now;
-    const newExpiresAt = baseTime + daysInSeconds;
-
-    // 事务：标记激活码已使用 + 更新会员到期时间
-    await prisma.$transaction([
-        prisma.activationCode.update({
-            where: { id: codeRow.id },
-            data: { usedAt: now },
-        }),
-        prisma.membership.upsert({
-            where: { id: "default" },
-            update: {
-                expiresAt: newExpiresAt,
-                updatedAt: now,
-            },
-            create: {
-                id: "default",
-                expiresAt: newExpiresAt,
-                updatedAt: now,
-            },
-        }),
-    ]);
-
-    return success(c, {
-        membershipExpiresAt: newExpiresAt,
-        membershipDaysAdded: codeRow.membershipDays,
-        membershipExpiresAtISO: new Date(newExpiresAt * 1000).toISOString(),
-    });
 });
 
 // ─── GET /membership — 查询会员状态 ───

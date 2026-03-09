@@ -29,8 +29,14 @@ vault.get("/", async (c) => {
 
 vault.put("/", async (c) => {
   const body = await c.req.json<VaultUpdateRequest>().catch(() => null);
-  if (!body?.encryptedVault || typeof body?.expectedVersion !== "number") {
-    return error(c, ErrorCode.INVALID_REQUEST, "Missing required fields: encryptedVault, expectedVersion", 400);
+
+  if (!body || typeof body.encryptedVault !== "string" || !Number.isInteger(body.expectedVersion)) {
+    return error(c, ErrorCode.INVALID_REQUEST, "Missing or invalid required fields: encryptedVault, expectedVersion", 400);
+  }
+
+  // 防御大型载荷引起的内存耗尽/DoS：设置 10MB 上限
+  if (body.encryptedVault.length > 10 * 1024 * 1024) {
+    return error(c, ErrorCode.INVALID_REQUEST, "Payload too large. Maximum size is 10MB", 400);
   }
 
   const now = Math.floor(Date.now() / 1000);
@@ -46,19 +52,24 @@ vault.put("/", async (c) => {
         updatedAt: now,
       },
     });
-  } catch {
-    // update with where constraint fails → version conflict or not found
-    const current = await prisma.vault.findUnique({
-      where: { id: "default" },
-      select: { version: true },
-    });
+  } catch (err: any) {
+    // P2025: 欲更新的记录不存在 (通常是因为 version 不匹配)
+    if (err.code === "P2025") {
+      const current = await prisma.vault.findUnique({
+        where: { id: "default" },
+        select: { version: true },
+      }).catch(() => null);
 
-    return error(
-      c,
-      ErrorCode.VAULT_VERSION_CONFLICT,
-      `Version conflict. Expected ${body.expectedVersion} but current is ${current?.version ?? "unknown"}`,
-      409,
-    );
+      return error(
+        c,
+        ErrorCode.VAULT_VERSION_CONFLICT,
+        `Version conflict. Expected ${body.expectedVersion} but current is ${current?.version ?? "unknown"}`,
+        409,
+      );
+    }
+
+    // 把其余真正的数据库断连/崩溃异常向外抛，避免被错误识别为版本冲突
+    throw err;
   }
 
   return success(c, {
