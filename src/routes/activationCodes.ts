@@ -1,10 +1,10 @@
 import crypto from "node:crypto";
 import { Hono } from "hono";
-import type { AppEnv } from "../types";
-import { ErrorCode } from "../types";
-import { authMiddleware } from "../middleware/auth";
-import { success, error } from "../utils/response";
-import prisma from "../prisma";
+import type { AppEnv } from "../types.js";
+import { ErrorCode } from "../types.js";
+import { authMiddleware } from "../middleware/auth.js";
+import { success, error } from "../utils/response.js";
+import prisma from "../prisma.js";
 
 const activationCodes = new Hono<AppEnv>();
 
@@ -140,6 +140,7 @@ interface RedeemRequest {
 }
 
 activationCodes.post("/redeem", async (c) => {
+    const userId = c.get("userId");
     const body = await c.req.json<RedeemRequest>().catch(() => null);
 
     if (!body?.code || typeof body.code !== "string") {
@@ -168,7 +169,7 @@ activationCodes.post("/redeem", async (c) => {
 
             // 查看当前会员状态
             const currentMembership = await tx.membership.findUnique({
-                where: { id: "default" },
+                where: { userId },
             });
 
             // 如果当前会员有效且未过期，在现有到期时间上叠加；否则从现在开始计算
@@ -180,22 +181,27 @@ activationCodes.post("/redeem", async (c) => {
             // 标记激活码已使用
             await tx.activationCode.update({
                 where: { id: codeRow.id },
-                data: { usedAt: now },
+                data: { usedAt: now, usedBy: userId },
             });
 
             // 更新会员到期时间
-            await tx.membership.upsert({
-                where: { id: "default" },
-                update: {
-                    expiresAt: newExpiresAt,
-                    updatedAt: now,
-                },
-                create: {
-                    id: "default",
-                    expiresAt: newExpiresAt,
-                    updatedAt: now,
-                },
-            });
+            if (currentMembership) {
+                await tx.membership.update({
+                    where: { userId },
+                    data: {
+                        expiresAt: newExpiresAt,
+                        updatedAt: now,
+                    },
+                });
+            } else {
+                await tx.membership.create({
+                    data: {
+                        userId,
+                        expiresAt: newExpiresAt,
+                        updatedAt: now,
+                    },
+                });
+            }
 
             return { newExpiresAt, membershipDays: codeRow.membershipDays };
         });
@@ -219,8 +225,9 @@ activationCodes.post("/redeem", async (c) => {
 // ─── GET /membership — 查询会员状态 ───
 
 activationCodes.get("/membership", async (c) => {
+    const userId = c.get("userId");
     const membership = await prisma.membership.findUnique({
-        where: { id: "default" },
+        where: { userId },
     });
 
     if (!membership) {

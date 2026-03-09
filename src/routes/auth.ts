@@ -1,58 +1,65 @@
 import crypto from "node:crypto";
 import { Hono } from "hono";
-import type { AppContext, AppEnv, OpenRequest, SetupRequest } from "../types";
-import { ErrorCode } from "../types";
-import { authMiddleware } from "../middleware/auth";
-import { createToken } from "../utils/crypto";
-import { error, success } from "../utils/response";
-import prisma from "../prisma";
+import type { AppContext, AppEnv, LoginRequest, RegisterRequest } from "../types.js";
+import { ErrorCode } from "../types.js";
+import { authMiddleware } from "../middleware/auth.js";
+import { createToken } from "../utils/crypto.js";
+import { error, success } from "../utils/response.js";
+import prisma from "../prisma.js";
 
 const auth = new Hono<AppEnv>();
 
-async function initHandler(c: AppContext) {
-  const body = await c.req.json<SetupRequest>().catch(() => null);
+async function registerHandler(c: AppContext) {
+  const body = await c.req.json<RegisterRequest>().catch(() => null);
 
-  if (!body?.encryptedVault || typeof body.encryptedVault !== "string") {
-    return error(c, ErrorCode.INVALID_REQUEST, "Missing or invalid required field: encryptedVault", 400);
+  if (!body?.email || !body?.authHash || !body?.salt || !body?.encryptedVault) {
+    return error(c, ErrorCode.INVALID_REQUEST, "Missing required fields", 400);
   }
 
-  const existing = await prisma.vault.findUnique({ where: { id: "default" }, select: { id: true } });
+  const existing = await prisma.user.findUnique({ where: { email: body.email }, select: { id: true } });
   if (existing) {
-    return error(c, ErrorCode.ALREADY_INITIALIZED, "This instance is already initialized", 409);
+    return error(c, ErrorCode.ALREADY_INITIALIZED, "User already exists", 409);
   }
 
   const now = Math.floor(Date.now() / 1000);
   const sessionId = crypto.randomUUID();
+  const userId = crypto.randomUUID();
   const rawIp = c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ?? c.req.header("x-real-ip") ?? "";
-  const ip = rawIp.slice(0, 45) || null; // 防护由于过大IP引起的崩溃
+  const ip = rawIp.slice(0, 45) || null;
   const deviceName = typeof body.deviceName === "string" ? body.deviceName.slice(0, 100) : "";
 
   try {
-    // 使用 Prisma 事务替代 D1 batch
     await prisma.$transaction([
-      prisma.vault.create({
+      prisma.user.create({
         data: {
-          id: "default",
-          encryptedData: body.encryptedVault,
-          version: 1,
-          updatedAt: now,
-        },
-      }),
-      prisma.session.create({
-        data: {
-          id: sessionId,
-          deviceName,
-          ipAddress: ip,
+          id: userId,
+          email: body.email,
+          authHash: body.authHash,
+          salt: body.salt,
           createdAt: now,
-          lastUsedAt: now,
-          expiresAt: now + 7 * 24 * 3600,
+          vault: {
+            create: {
+              encryptedData: body.encryptedVault,
+              version: 1,
+              updatedAt: now,
+            }
+          },
+          sessions: {
+            create: {
+              id: sessionId,
+              deviceName,
+              ipAddress: ip,
+              createdAt: now,
+              lastUsedAt: now,
+              expiresAt: now + 30 * 24 * 3600, // 30 days
+            }
+          }
         },
       }),
     ]);
   } catch (err: any) {
-    // 捕获在高并发情况下极小概率绕过 findUnique 的独特约束插入报错
     if (err.code === "P2002") {
-      return error(c, ErrorCode.ALREADY_INITIALIZED, "This instance is already initialized", 409);
+      return error(c, ErrorCode.ALREADY_INITIALIZED, "User already exists", 409);
     }
     throw err;
   }
@@ -61,12 +68,16 @@ async function initHandler(c: AppContext) {
   return success(c, { token }, 201);
 }
 
-async function unlockHandler(c: AppContext) {
-  const body = await c.req.json<OpenRequest>().catch(() => null);
+async function loginHandler(c: AppContext) {
+  const body = await c.req.json<LoginRequest>().catch(() => null);
 
-  const existing = await prisma.vault.findUnique({ where: { id: "default" }, select: { id: true } });
-  if (!existing) {
-    return error(c, ErrorCode.NOT_FOUND, "This instance has not been initialized yet", 404);
+  if (!body?.email || !body?.authHash) {
+    return error(c, ErrorCode.INVALID_REQUEST, "Missing required fields", 400);
+  }
+
+  const user = await prisma.user.findUnique({ where: { email: body.email } });
+  if (!user || user.authHash !== body.authHash) {
+    return error(c, ErrorCode.UNAUTHORIZED, "Invalid email or master password", 401);
   }
 
   const now = Math.floor(Date.now() / 1000);
@@ -78,23 +89,38 @@ async function unlockHandler(c: AppContext) {
   await prisma.session.create({
     data: {
       id: sessionId,
+      userId: user.id,
       deviceName,
       ipAddress: ip,
       createdAt: now,
       lastUsedAt: now,
-      expiresAt: now + 7 * 24 * 3600,
+      expiresAt: now + 30 * 24 * 3600,
     },
   });
 
   const token = createToken(sessionId, c.get("jwtSecret"));
-  return success(c, { token });
+  return success(c, { token, salt: user.salt, deviceId: deviceName });
 }
 
-auth.post("/init", initHandler);
-auth.post("/unlock", unlockHandler);
+async function saltHandler(c: AppContext) {
+  const email = c.req.query("email");
+  if (!email) {
+    return error(c, ErrorCode.INVALID_REQUEST, "Missing email", 400);
+  }
+
+  const user = await prisma.user.findUnique({ where: { email } });
+  if (!user) {
+    return error(c, ErrorCode.NOT_FOUND, "User not found", 404);
+  }
+
+  return success(c, { salt: user.salt });
+}
+
+auth.post("/register", registerHandler);
+auth.post("/login", loginHandler);
+auth.get("/salt", saltHandler);
 
 auth.post("/logout", authMiddleware, async (c) => {
-  // 使用 deleteMany 防止记录不存在时引发 Prisma P2025 的 500 崩溃
   await prisma.session.deleteMany({ where: { id: c.get("sessionId") } });
   return success(c, { success: true });
 });

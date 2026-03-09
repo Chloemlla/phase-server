@@ -1,7 +1,7 @@
 import { createMiddleware } from "hono/factory";
-import type { AppEnv } from "../types";
-import { ErrorCode } from "../types";
-import prisma from "../prisma";
+import type { AppEnv } from "../types.js";
+import { ErrorCode } from "../types.js";
+import prisma from "../prisma.js";
 
 interface RateLimitConfig {
   limit: number;

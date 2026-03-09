@@ -1,9 +1,9 @@
 import { Hono } from "hono";
-import type { AppEnv, SessionInfo } from "../types";
-import { ErrorCode } from "../types";
-import { success, error } from "../utils/response";
-import { authMiddleware } from "../middleware/auth";
-import prisma from "../prisma";
+import type { AppEnv, SessionInfo } from "../types.js";
+import { ErrorCode } from "../types.js";
+import { success, error } from "../utils/response.js";
+import { authMiddleware } from "../middleware/auth.js";
+import prisma from "../prisma.js";
 
 const sessions = new Hono<AppEnv>();
 
@@ -13,10 +13,14 @@ sessions.use("/*", authMiddleware);
 
 sessions.get("/", async (c) => {
   const currentSessionId = c.get("sessionId");
+  const userId = c.get("userId");
   const now = Math.floor(Date.now() / 1000);
 
   const rows = await prisma.session.findMany({
-    where: { expiresAt: { gt: now } },
+    where: {
+      userId,
+      expiresAt: { gt: now }
+    },
     orderBy: { lastUsedAt: "desc" },
   });
 
@@ -36,6 +40,7 @@ sessions.get("/", async (c) => {
 
 sessions.delete("/:id", async (c) => {
   const sessionId = c.req.param("id");
+  const userId = c.get("userId");
 
   // 不允许撤销当前会话（用 logout 代替）
   if (sessionId === c.get("sessionId")) {
@@ -43,7 +48,16 @@ sessions.delete("/:id", async (c) => {
   }
 
   try {
-    await prisma.session.delete({ where: { id: sessionId } });
+    const result = await prisma.session.deleteMany({
+      where: {
+        id: sessionId,
+        userId: userId
+      }
+    });
+
+    if (result.count === 0) {
+      return error(c, ErrorCode.NOT_FOUND, "Session not found", 404);
+    }
   } catch {
     return error(c, ErrorCode.NOT_FOUND, "Session not found", 404);
   }

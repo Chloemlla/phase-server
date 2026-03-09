@@ -1,8 +1,8 @@
 import { createMiddleware } from "hono/factory";
-import type { AppEnv } from "../types";
-import { ErrorCode } from "../types";
-import { verifyToken } from "../utils/crypto";
-import prisma from "../prisma";
+import type { AppEnv } from "../types.js";
+import { ErrorCode } from "../types.js";
+import { verifyToken } from "../utils/crypto.js";
+import prisma from "../prisma.js";
 
 export const authMiddleware = createMiddleware<AppEnv>(async (c, next) => {
   const header = c.req.header("Authorization");
@@ -31,7 +31,7 @@ export const authMiddleware = createMiddleware<AppEnv>(async (c, next) => {
       id: payload.sid,
       expiresAt: { gt: now },
     },
-    select: { id: true },
+    select: { id: true, userId: true },
   });
 
   if (!session) {
@@ -48,5 +48,6 @@ export const authMiddleware = createMiddleware<AppEnv>(async (c, next) => {
   });
 
   c.set("sessionId", payload.sid);
+  c.set("userId", session.userId);
   await next();
 });

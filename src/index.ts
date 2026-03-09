@@ -1,16 +1,16 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serve } from "@hono/node-server";
-import { instanceTokenMiddleware } from "./middleware/instanceToken";
-import { rateLimitMiddleware } from "./middleware/rateLimit";
-import auth from "./routes/auth";
-import sessions from "./routes/sessions";
-import vault from "./routes/vault";
-import activationCodes from "./routes/activationCodes";
-import type { AppContext, AppEnv } from "./types";
-import { ErrorCode } from "./types";
-import { ensureInitialized } from "./utils/init";
-import prisma from "./prisma";
+import { instanceTokenMiddleware } from "./middleware/instanceToken.js";
+import { rateLimitMiddleware } from "./middleware/rateLimit.js";
+import auth from "./routes/auth.js";
+import sessions from "./routes/sessions.js";
+import vault from "./routes/vault.js";
+import activationCodes from "./routes/activationCodes.js";
+import type { AppContext, AppEnv } from "./types.js";
+import { ErrorCode } from "./types.js";
+import { ensureInitialized } from "./utils/init.js";
+import prisma from "./prisma.js";
 
 const app = new Hono<AppEnv>();
 
@@ -37,19 +37,14 @@ app.use("/api/*", instanceTokenMiddleware);
 app.use("/api/*", rateLimitMiddleware);
 
 async function healthHandler(c: AppContext) {
-  const row = await prisma.vault.findUnique({ where: { id: "default" }, select: { id: true } });
-  const membership = await prisma.membership.findUnique({ where: { id: "default" } });
-  const now = Math.floor(Date.now() / 1000);
-  const membershipActive = membership ? membership.expiresAt > now : false;
-
   return c.json({
     status: "ok" as const,
-    initialized: !!row,
-    version: "0.3.0",
+    initialized: true,
+    version: "0.4.0", // upgraded to multi-tenant
     instanceSalt: c.get("instanceSalt"),
     membership: {
-      active: membershipActive,
-      expiresAt: membership?.expiresAt ?? null,
+      active: false,
+      expiresAt: null,
     },
   });
 }
@@ -57,11 +52,9 @@ async function healthHandler(c: AppContext) {
 app.get("/", async (c) => {
   try {
     const { instanceSalt } = await ensureInitialized(process.env.JWT_SECRET);
-    const row = await prisma.vault.findUnique({ where: { id: "default" }, select: { id: true } });
-
     return c.json({
       status: "ok" as const,
-      initialized: !!row,
+      initialized: true,
       apiBase: "/api/v1",
       health: "/api/v1/health",
       instanceSalt,

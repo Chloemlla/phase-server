@@ -1,6 +1,6 @@
 import { createMiddleware } from "hono/factory";
-import type { AppEnv } from "../types";
-import { ErrorCode } from "../types";
+import type { AppEnv } from "../types.js";
+import { ErrorCode } from "../types.js";
 
 export const instanceTokenMiddleware = createMiddleware<AppEnv>(async (c, next) => {
   if (c.req.path === "/api/v1/setup-token" || c.req.path === "/api/v1/health") {

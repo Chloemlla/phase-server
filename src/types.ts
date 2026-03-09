@@ -3,10 +3,11 @@ import type { Context } from "hono";
 // ─── App Context ───
 
 export type Variables = {
-  jwtSecret: string;      // 由 init 中间件注入
-  instanceSalt: string;   // 由 init 中间件注入，用于客户端 PBKDF2
-  instanceToken: string;  // 由 init 中间件注入，用于校验客户端请求
+  jwtSecret: string;
+  instanceSalt: string;   // Deprecated in multi-user mode, keeping for backward compatibility
+  instanceToken: string;  // Deprecated in multi-user mode, keeping for backward compatibility
   sessionId: string;      // 由 authMiddleware 注入
+  userId: string;         // 由 authMiddleware 注入
 };
 
 export type AppEnv = { Variables: Variables };
@@ -14,12 +15,17 @@ export type AppContext = Context<AppEnv>;
 
 // ─── API 请求 ───
 
-export interface SetupRequest {
-  encryptedVault: string;  // 客户端用主密码加密的空 vault
+export interface RegisterRequest {
+  email: string;
+  authHash: string;
+  salt: string;            // User specific salt for deriving master key
+  encryptedVault: string;
   deviceName?: string;
 }
 
-export interface OpenRequest {
+export interface LoginRequest {
+  email: string;
+  authHash: string;
   deviceName?: string;
 }
 

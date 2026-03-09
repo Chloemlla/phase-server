@@ -1,9 +1,9 @@
 import { Hono } from "hono";
-import type { AppEnv, VaultUpdateRequest } from "../types";
-import { ErrorCode } from "../types";
-import { success, error } from "../utils/response";
-import { authMiddleware } from "../middleware/auth";
-import prisma from "../prisma";
+import type { AppEnv, VaultUpdateRequest } from "../types.js";
+import { ErrorCode } from "../types.js";
+import { success, error } from "../utils/response.js";
+import { authMiddleware } from "../middleware/auth.js";
+import prisma from "../prisma.js";
 
 const vault = new Hono<AppEnv>();
 
@@ -12,7 +12,8 @@ vault.use("/*", authMiddleware);
 // ─── GET / ───
 
 vault.get("/", async (c) => {
-  const row = await prisma.vault.findUnique({ where: { id: "default" } });
+  const userId = c.get("userId");
+  const row = await prisma.vault.findUnique({ where: { userId } });
 
   if (!row) {
     return error(c, ErrorCode.NOT_FOUND, "Vault not found", 404);
@@ -28,6 +29,7 @@ vault.get("/", async (c) => {
 // ─── PUT / ───
 
 vault.put("/", async (c) => {
+  const userId = c.get("userId");
   const body = await c.req.json<VaultUpdateRequest>().catch(() => null);
 
   if (!body || typeof body.encryptedVault !== "string" || !Number.isInteger(body.expectedVersion)) {
@@ -43,33 +45,31 @@ vault.put("/", async (c) => {
   const newVersion = body.expectedVersion + 1;
 
   // 乐观锁：只有 version 匹配时才更新
-  try {
-    await prisma.vault.update({
-      where: { id: "default", version: body.expectedVersion },
-      data: {
-        encryptedData: body.encryptedVault,
-        version: newVersion,
-        updatedAt: now,
-      },
-    });
-  } catch (err: any) {
-    // P2025: 欲更新的记录不存在 (通常是因为 version 不匹配)
-    if (err.code === "P2025") {
-      const current = await prisma.vault.findUnique({
-        where: { id: "default" },
-        select: { version: true },
-      }).catch(() => null);
+  const updateResult = await prisma.vault.updateMany({
+    where: { userId, version: body.expectedVersion },
+    data: {
+      encryptedData: body.encryptedVault,
+      version: newVersion,
+      updatedAt: now,
+    },
+  });
 
+  if (updateResult.count === 0) {
+    const current = await prisma.vault.findUnique({
+      where: { userId },
+      select: { version: true },
+    }).catch(() => null);
+
+    if (current) {
       return error(
         c,
         ErrorCode.VAULT_VERSION_CONFLICT,
-        `Version conflict. Expected ${body.expectedVersion} but current is ${current?.version ?? "unknown"}`,
+        `Version conflict. Expected ${body.expectedVersion} but current is ${current.version}`,
         409,
       );
+    } else {
+      return error(c, ErrorCode.NOT_FOUND, "Vault not found", 404);
     }
-
-    // 把其余真正的数据库断连/崩溃异常向外抛，避免被错误识别为版本冲突
-    throw err;
   }
 
   return success(c, {

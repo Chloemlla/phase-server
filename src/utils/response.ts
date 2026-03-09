@@ -1,5 +1,5 @@
-import type { AppContext } from "../types";
-import { ErrorCode } from "../types";
+import type { AppContext } from "../types.js";
+import { ErrorCode } from "../types.js";
 
 export function success<T>(c: AppContext, data: T, status: 200 | 201 = 200) {
   return c.json(data, status);

@@ -15,24 +15,46 @@ model Config {
   @@map("config")
 }
 
-/// 加密保险库（单实例单 vault，id 固定为 'default'）
+/// Пользователь表 (Multi-User)
+model User {
+  id        String   @id @default(uuid()) @map("_id")
+  email     String   @unique
+  authHash  String   @map("auth_hash")
+  salt      String   // 特定于用户的盐，用于派生主密钥
+  createdAt Int      @map("created_at")
+
+  vault           Vault?
+  sessions        Session[]
+  membership      Membership?
+  activationCodes ActivationCode[]
+
+  @@map("users")
+}
+
+/// 加密保险库（每个用户独立）
 model Vault {
-  id            String @id @default("default") @map("_id")
+  id            String @id @default(uuid()) @map("_id")
+  userId        String @unique @map("user_id")
   encryptedData String @map("encrypted_data")
   version       Int    @default(1)
   updatedAt     Int    @map("updated_at")
 
+  user          User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@map("vault")
 }
 
-/// 会话表
+/// 会话表（每个用户多个）
 model Session {
   id         String  @id @default(uuid()) @map("_id")
+  userId     String  @map("user_id")
   deviceName String  @default("") @map("device_name")
   ipAddress  String? @map("ip_address")
   createdAt  Int     @map("created_at")
   lastUsedAt Int     @map("last_used_at")
   expiresAt  Int     @map("expires_at")
+
+  user       User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([expiresAt], name: "idx_sessions_expires_at")
   @@map("sessions")
@@ -57,16 +79,22 @@ model ActivationCode {
   membershipDays Int     @map("membership_days")    // 激活后赋予的会员天数
   note           String  @default("")               // 备注（可选）
   usedAt         Int?    @map("used_at")            // 使用时间（null 表示未使用）
+  usedBy         String? @map("used_by")            // 使用该激活码的用户 ID
   createdAt      Int     @map("created_at")
+
+  user           User?   @relation(fields: [usedBy], references: [id])
 
   @@map("activation_codes")
 }
 
-/// 会员状态表（单实例单行，id 固定为 'default'）
+/// 会员状态表（每个用户独立）
 model Membership {
-  id        String @id @default("default") @map("_id")
+  id        String @id @default(uuid()) @map("_id")
+  userId    String @unique @map("user_id")
   expiresAt Int    @map("expires_at")               // 会员到期时间（Unix 秒）
   updatedAt Int    @map("updated_at")
+
+  user      User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("membership")
 }

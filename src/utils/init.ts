@@ -1,7 +1,7 @@
 // 自动初始化：自动生成 JWT Secret + instanceSalt + instanceToken
 // 用户部署后无需任何手动操作
 
-import prisma from "../prisma";
+import prisma from "../prisma.js";
 
 // 同一进程内缓存，避免每次请求都查数据库
 let cachedJwtSecret: string | null = null;
