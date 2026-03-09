@@ -2,7 +2,7 @@ name: Setup Dependencies
 
 on:
   push:
-    branches: [main]
+    branches: [master]
     paths:
       - 'package.json'
       - 'prisma/schema.prisma'
@@ -22,14 +22,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: 'pnpm'
 
       - name: Install dependencies
-        run: pnpm install
-
-      - name: Install production security libraries
-        run: |
-          pnpm add @simplewebauthn/server syslog-client
-          echo "Installed production security libraries"
+        run: pnpm install --no-frozen-lockfile
 
       - name: Generate Prisma client
         run: pnpm exec prisma generate
