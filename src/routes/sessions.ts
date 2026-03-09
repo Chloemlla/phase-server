@@ -3,6 +3,7 @@ import type { AppEnv, SessionInfo } from "../types.js";
 import { ErrorCode } from "../types.js";
 import { success, error } from "../utils/response.js";
 import { authMiddleware } from "../middleware/auth.js";
+import { logSecurityEvent, createSessionEvent } from "../utils/securityEvents.js";
 import prisma from "../prisma.js";
 
 const sessions = new Hono<AppEnv>();
@@ -41,9 +42,10 @@ sessions.get("/", async (c) => {
 sessions.delete("/:id", async (c) => {
   const sessionId = c.req.param("id");
   const userId = c.get("userId");
+  const currentSessionId = c.get("sessionId");
 
   // 不允许撤销当前会话（用 logout 代替）
-  if (sessionId === c.get("sessionId")) {
+  if (sessionId === currentSessionId) {
     return error(c, ErrorCode.INVALID_REQUEST, "Cannot revoke current session. Use logout instead.", 400);
   }
 
@@ -58,6 +60,14 @@ sessions.delete("/:id", async (c) => {
     if (result.count === 0) {
       return error(c, ErrorCode.NOT_FOUND, "Session not found", 404);
     }
+
+    // 记录会话撤销事件
+    await logSecurityEvent(createSessionEvent(
+      "session_revoked",
+      userId,
+      sessionId,
+      { revokedBy: userId }
+    ));
   } catch {
     return error(c, ErrorCode.NOT_FOUND, "Session not found", 404);
   }

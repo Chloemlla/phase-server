@@ -23,10 +23,11 @@ model User {
   salt      String   // 特定于用户的盐，用于派生主密钥
   createdAt Int      @map("created_at")
 
-  vault           Vault?
-  sessions        Session[]
-  membership      Membership?
-  activationCodes ActivationCode[]
+  vault              Vault?
+  sessions           Session[]
+  membership         Membership?
+  activationCodes    ActivationCode[]
+  webauthnCredentials WebAuthnCredential[]
 
   @@map("users")
 }
@@ -97,4 +98,35 @@ model Membership {
   user      User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("membership")
+}
+
+/// WebAuthn 凭证表（硬件密钥）
+model WebAuthnCredential {
+  id           String  @id @default(uuid()) @map("_id")
+  userId       String  @map("user_id")
+  name         String                                 // 用户自定义名称（如 "YubiKey 5C"）
+  credentialId String  @unique @map("credential_id")  // Base64 编码的凭证 ID
+  publicKey    String  @map("public_key")             // Base64 编码的公钥
+  counter      Int     @default(0)                    // 签名计数器
+  aaguid       String? @map("aaguid")                 // 认证器 AAGUID
+  transports   String? @map("transports")             // 传输方式（JSON 数组字符串）
+  createdAt    Int     @map("created_at")
+  lastUsedAt   Int?    @map("last_used_at")
+
+  user         User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId], name: "idx_webauthn_user_id")
+  @@map("webauthn_credentials")
+}
+
+/// WebAuthn 挑战表（临时存储，5分钟过期）
+model WebAuthnChallenge {
+  id        String @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String @unique @map("user_id")
+  challenge String                                    // Base64 编码的挑战
+  createdAt Int    @map("created_at")
+  expiresAt Int    @map("expires_at")
+
+  @@index([expiresAt], name: "idx_webauthn_challenges_expires")
+  @@map("webauthn_challenges")
 }

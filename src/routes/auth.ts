@@ -5,6 +5,7 @@ import { ErrorCode } from "../types.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { createToken } from "../utils/crypto.js";
 import { error, success } from "../utils/response.js";
+import { logSecurityEvent, createAuthEvent } from "../utils/securityEvents.js";
 import prisma from "../prisma.js";
 
 const auth = new Hono<AppEnv>();
@@ -65,6 +66,15 @@ async function registerHandler(c: AppContext) {
   }
 
   const token = createToken(sessionId, c.get("jwtSecret"));
+
+  // 记录注册成功事件
+  await logSecurityEvent(createAuthEvent(
+    "register",
+    userId,
+    ip || "unknown",
+    { email: body.email, deviceName }
+  ));
+
   return success(c, { token }, 201);
 }
 
@@ -76,14 +86,24 @@ async function loginHandler(c: AppContext) {
   }
 
   const user = await prisma.user.findUnique({ where: { email: body.email } });
+
+  const rawIp = c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ?? c.req.header("x-real-ip") ?? "";
+  const ip = rawIp.slice(0, 45) || null;
+
   if (!user || user.authHash !== body.authHash) {
+    // 记录登录失败事件
+    await logSecurityEvent(createAuthEvent(
+      "login_failed",
+      user?.id || "unknown",
+      ip || "unknown",
+      { email: body.email, reason: "invalid_credentials" }
+    ));
+
     return error(c, ErrorCode.UNAUTHORIZED, "Invalid email or master password", 401);
   }
 
   const now = Math.floor(Date.now() / 1000);
   const sessionId = crypto.randomUUID();
-  const rawIp = c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ?? c.req.header("x-real-ip") ?? "";
-  const ip = rawIp.slice(0, 45) || null;
   const deviceName = typeof body?.deviceName === "string" ? body.deviceName.slice(0, 100) : "";
 
   await prisma.session.create({
@@ -99,6 +119,15 @@ async function loginHandler(c: AppContext) {
   });
 
   const token = createToken(sessionId, c.get("jwtSecret"));
+
+  // 记录登录成功事件
+  await logSecurityEvent(createAuthEvent(
+    "login_success",
+    user.id,
+    ip || "unknown",
+    { email: user.email, deviceName, sessionId }
+  ));
+
   return success(c, { token, salt: user.salt, deviceId: deviceName });
 }
 
@@ -121,8 +150,63 @@ auth.post("/login", loginHandler);
 auth.get("/salt", saltHandler);
 
 auth.post("/logout", authMiddleware, async (c) => {
-  await prisma.session.deleteMany({ where: { id: c.get("sessionId") } });
+  const sessionId = c.get("sessionId");
+  const userId = c.get("userId");
+
+  await prisma.session.deleteMany({ where: { id: sessionId } });
+
+  // 记录登出事件
+  await logSecurityEvent(createAuthEvent(
+    "logout",
+    userId,
+    c.req.header("x-forwarded-for")?.split(",")[0]?.trim() || c.req.header("x-real-ip") || "unknown",
+    { sessionId }
+  ));
+
   return success(c, { success: true });
+});
+
+// ─── POST /biometric/validate - 验证生物识别会话（可选）───
+
+interface BiometricValidateRequest {
+  deviceId: string;
+  biometricToken: string;
+}
+
+auth.post("/biometric/validate", authMiddleware, async (c) => {
+  const userId = c.get("userId");
+  const sessionId = c.get("sessionId");
+  const body = await c.req.json<BiometricValidateRequest>().catch(() => null);
+
+  if (!body?.deviceId || !body?.biometricToken) {
+    return error(c, ErrorCode.INVALID_REQUEST, "Missing required fields", 400);
+  }
+
+  // 验证生物识别令牌（简化实现）
+  // 生产环境应该验证令牌的有效性和设备绑定
+  const now = Math.floor(Date.now() / 1000);
+
+  // 更新会话最后使用时间
+  await prisma.session.update({
+    where: { id: sessionId },
+    data: { lastUsedAt: now },
+  });
+
+  // 记录生物识别验证事件
+  await logSecurityEvent({
+    event_type: "authentication",
+    action: "login_success",
+    user_id: userId,
+    session_id: sessionId,
+    device_id: body.deviceId,
+    timestamp: new Date().toISOString(),
+    metadata: { authMethod: "biometric" },
+  });
+
+  return success(c, {
+    valid: true,
+    sessionExtended: true,
+  });
 });
 
 export default auth;

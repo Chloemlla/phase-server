@@ -7,6 +7,8 @@ import auth from "./routes/auth.js";
 import sessions from "./routes/sessions.js";
 import vault from "./routes/vault.js";
 import activationCodes from "./routes/activationCodes.js";
+import webauthn from "./routes/webauthn.js";
+import security from "./routes/security.js";
 import type { AppContext, AppEnv } from "./types.js";
 import { ErrorCode } from "./types.js";
 import { ensureInitialized } from "./utils/init.js";
@@ -102,6 +104,8 @@ app.route("/api/v1/auth", auth);
 app.route("/api/v1/auth/devices", sessions);
 app.route("/api/v1/vault", vault);
 app.route("/api/v1/activation-codes", activationCodes);
+app.route("/api/v1/webauthn", webauthn);
+app.route("/api/v1/security", security);
 
 app.get("/api/v1/health", healthHandler);
 
